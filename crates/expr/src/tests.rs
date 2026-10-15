@@ -521,6 +521,70 @@ fn mask_properties() {
     assert_close!(f.num("mask('Mask 1').maskExpansion + 1", 0.0), 1.0);
 }
 
+/// Gives layer B a "Tracker 1" whose Track Point 1 Attach Point is keyed (10, 20) at 0 s and
+/// (30, 60) at 1 s, like an analysed track.
+fn with_tracker(f: &mut Fx) {
+    use effectcraft_project::tracking::{PointInit, TrackKind, TrackerSettings, tracker};
+    let init = PointInit { center: [10.0, 20.0], feature_size: [8.0; 2], search_offset: [0.0; 2], search_size: [16.0; 2], attach_offset: [0.0; 2] };
+    let g = group_push(&mut f.p, |ids| tracker(ids, "Tracker 1", TrackerSettings::new(TrackKind::Transform), &[init]));
+    let b = f.b;
+    let mut ids_next = f.p.next_id;
+    let l = f.layer_mut(b);
+    let trackers = l.motion_trackers_mut(&mut Ids(&mut ids_next)).unwrap();
+    trackers.children.push(g.into());
+    let ap = l.props.prop_mut("motionTrackers/#1/#1/attachPoint").unwrap();
+    ap.keys = vec![Keyframe::new(Tick::ZERO, Value::Vec2([10.0, 20.0])), Keyframe::new(secs(1.0), Value::Vec2([30.0, 60.0]))];
+    f.p.next_id = ids_next;
+}
+
+#[test]
+fn motion_tracker_attach_point() {
+    let mut f = fx();
+    with_tracker(&mut f);
+    let p = f.pos("thisComp.layer('B').motionTracker('Tracker 1')('Track Point 1').attachPoint", 1.0);
+    assert_close!(p[0], 30.0);
+    assert_close!(p[1], 60.0);
+    let p = f.pos("thisComp.layer(2).motionTracker(1)(1).attachPoint", 0.0);
+    assert_close!(p[0], 10.0);
+    assert_close!(p[1], 20.0);
+    // The track point's other properties, by attribute and by display name.
+    assert_close!(f.num("thisComp.layer('B').motionTracker('Tracker 1')('Track Point 1').featureSize[0]", 0.0), 8.0);
+    assert_close!(f.num("thisComp.layer('B').motionTracker('Tracker 1')('Track Point 1')('Search Size')[1]", 0.0), 16.0);
+    assert_close!(f.num("thisComp.layer('B').motionTracker('Tracker 1')('Track Point 1').confidence", 0.0), 0.0);
+    assert_eq!(f.text("thisComp.layer('B').motionTracker('Tracker 1').name", 0.0), "Tracker 1");
+    // AE's generic paths: a layer is callable, and has property().
+    let p = f.pos("thisComp.layer('B')('Motion Trackers')('Tracker 1')('Track Point 1')('Attach Point')", 1.0);
+    assert_close!(p[0], 30.0);
+    let p = f.pos("thisComp.layer('B').property('Motion Trackers').property('Tracker 1')(1).attachPoint.valueAtTime(0.5)", 0.0);
+    assert_close!(p[0], 20.0);
+    assert_close!(f.num("thisComp.layer('B')('Transform')('Position')[0]", 0.0), 100.0);
+    // Layer-space attach point mapped to comp space.
+    let p = f.pos("L = thisComp.layer('B'); L.toComp(L.motionTracker('Tracker 1')('Track Point 1').attachPoint)", 0.0);
+    assert_close!(p[0], 100.0 - 20.0 + 10.0);
+    assert_close!(p[1], 50.0 - 20.0 + 20.0);
+}
+
+#[test]
+fn missing_motion_tracker_is_an_error() {
+    let mut f = fx();
+    let e = f.err("thisComp.layer('B').motionTracker('Tracker 1')");
+    assert!(e.contains("Motion tracker \"Tracker 1\" not found"), "{e}");
+    with_tracker(&mut f);
+    let e = f.err("thisComp.layer('B').motionTracker('Tracker 9')");
+    assert!(e.contains("Tracker 9"), "{e}");
+    let e = f.err("thisComp.layer('B')('Nope')");
+    assert!(e.contains("Nope"), "{e}");
+}
+
+#[test]
+fn layers_stay_layers_when_callable() {
+    let f = fx();
+    // Relative lookups, string conversion and attributes still work.
+    assert_close!(f.num("thisComp.layer(thisComp.layer('B'), 1).index", 0.0), 3.0);
+    assert_eq!(f.text("String(thisComp.layer('B'))", 0.0), "[object Layer]");
+    assert_close!(f.num("thisComp.layer('B').name.length", 0.0), 1.0);
+}
+
 #[test]
 fn shape_content_paths() {
     let f = fx();
