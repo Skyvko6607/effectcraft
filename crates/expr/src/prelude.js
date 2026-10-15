@@ -44,7 +44,7 @@ function __finish(r) {
 
 function __result(r) {
   r = __v(r);
-  if (r !== null && typeof r === 'object' && r.__isLayer) return r.index;
+  if (__isLayer(r)) return r.index;
   if (r !== null && typeof r === 'object' && r.__isTextStyle) return r.__out();
   // `[temp, temp]` where temp is a property (pick-whip 1D → 2D): read the values here, while
   // host requests can still be answered and the script re-run.
@@ -449,7 +449,7 @@ Comp.prototype = {
     __err('Composition "' + this.name + '" has no active camera');
   },
   layer: function (a, rel) {
-    if (a !== null && typeof a === 'object' && a.__isLayer) return this.layer(a.index + (rel || 0));
+    if (__isLayer(a)) return this.layer(a.index + (rel || 0));
     var id = __h(__LAYER, this.__c, a);
     if (id === null) __err(typeof a === 'string' ? 'Layer named "' + a + '" does not exist' : 'Layer index ' + a + ' out of range');
     return new Layer(this.__c, id);
@@ -527,7 +527,20 @@ var thisProject = {
 
 // Layer -----------------------------------------------------------------------------------------
 
-function Layer(c, l) { this.__c = c; this.__l = l; this.__i = null; }
+// A layer is callable like AE's (`thisComp.layer(1)("Motion Trackers")`): `new Layer(c, l)`
+// returns a function whose prototype is `Layer.prototype`.
+function Layer(c, l) {
+  var f = function (k) { return f.__get(k); };
+  delete f.name;
+  delete f.length;
+  Object.setPrototypeOf(f, Layer.prototype);
+  f.__c = c; f.__l = l; f.__i = null;
+  return f;
+}
+
+function __isLayer(x) {
+  return x !== null && (typeof x === 'object' || typeof x === 'function') && x.__isLayer === true;
+}
 
 function __m3(m, p) {
   var x = p[0] || 0, y = p[1] || 0;
@@ -589,6 +602,19 @@ Layer.prototype = {
   get opacity() { return this.transform.opacity; },
   get anchorPoint() { return this.transform.anchorPoint; },
   get text() { return this.__group('text'); },
+  __get: function (k) {
+    var r = __child(this.__c, this.__l, '', k);
+    if (r === undefined) __err('Property ' + (typeof k === 'string' ? '"' + k + '"' : k) + ' not found on layer "' + this.name + '"');
+    return r;
+  },
+  property: function (k) { return this.__get(k); },
+  // Motion Trackers ▸ Tracker (`motionTracker("Tracker 1")("Track Point 1").attachPoint`).
+  motionTracker: function (k) {
+    var g = __child(this.__c, this.__l, '', 'motionTrackers');
+    var t = g === undefined ? undefined : __child(g.__c, g.__l, g.__p, k);
+    if (t === undefined) __err('Motion tracker ' + (typeof k === 'string' ? '"' + k + '"' : k) + ' not found on layer "' + this.name + '"');
+    return t;
+  },
   get cameraOption() { return this.__group('cameraOptions'); },
   get lightOption() { return this.__group('lightOptions'); },
   get marker() { return new Markers(this.__c, this.__l); },
@@ -822,14 +848,14 @@ var __propHandler = {
     // A layer-valued property (a Layer Control's Layer) is named as its layer (#809).
     if (k === 'name' && t.__info[2] === 'layer') {
       var lv = t.value;
-      if (lv !== null && lv !== undefined && lv.__isLayer) return lv.name;
+      if (__isLayer(lv)) return lv.name;
     }
     if (k in t) return t[k];
     var v = t.value;
     if (v === null || v === undefined) return undefined;
     var x = v[k];
-    // Property groups are callable proxies: hand them over as they are, not bound like methods (#809).
-    if (x !== null && x !== undefined && x.__isGroup) return x;
+    // Property groups and layers are callable: hand them over as they are, not bound like methods (#809).
+    if (x !== null && x !== undefined && (x.__isGroup || x.__isLayer)) return x;
     return typeof x === 'function' ? x.bind(v) : x;
   },
 };
